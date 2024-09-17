@@ -4,7 +4,8 @@ from ._dict import (
     classify_parameters,
     classify_parameter_descriptions,
 )
-from ._func import (
+
+from q2_classo._func import (
     generate_data,
     transform_features,
     add_taxa,
@@ -14,6 +15,7 @@ from ._func import (
     predict,
     prediction_data,
     to_zarr)
+
 from ._formats import (
     CLASSOProblemDirectoryFormat,
     ZarrProblemFormat,

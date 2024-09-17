@@ -1,3 +1,0 @@
-[qiime2.plugins]
-q2-classo = q2_classo.plugin_setup:plugin
-

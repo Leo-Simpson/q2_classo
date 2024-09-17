@@ -1,0 +1,15 @@
+/.ipynb_checkpoints/
+Dockerfile
+*.xml
+.DS_Store
+.idea/
+dist/
+example/.DS_Store
+q2_classo.egg-info/
+q2_classo/__pycache__/
+q2_classo/.DS_Store
+tutorial/qiime2-protocol.ipynb
+build/*
+example/.ipynb_checkpoints/
+example/rename-fastqs.ipynb
+q2_classo/test_classo.py

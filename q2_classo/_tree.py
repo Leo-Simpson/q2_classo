@@ -3,7 +3,7 @@ import numpy as np
 
 from plotly import graph_objects
 
-colors = {"threshold": "red", "selected": "green", "unselected": "blue"}
+colors = {"threshold": "#8e0202", "selected": "#f74e6b", "unselected": "#68025e"}
 
 
 def make_lists_tree(sktree, circular=False):

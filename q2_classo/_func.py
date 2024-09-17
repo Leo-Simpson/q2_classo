@@ -2,24 +2,6 @@ import numpy as np
 import zarr
 from classo import *
 
-
-from qiime2.plugin import (
-    SemanticType,
-    Plugin,
-    Int,
-    Float,
-    Range,
-    Metadata,
-    Str,
-    Bool,
-    Choices,
-    MetadataColumn,
-    Categorical,
-    List,
-    Citations,
-    TypeMatch,
-    Numeric,
-)
 from q2_types.feature_table import FeatureTable, Composition
 from q2_types.feature_data import FeatureData
 import qiime2
@@ -40,13 +22,12 @@ class prediction_data:
 
 
 def generate_data(
-    taxa: skbio.TreeNode = None,
-    n: int = 100,
-    d: int = 80,
-    d_nonzero: int = 5,
-    classification: bool = False,
+        taxa: skbio.TreeNode = None,
+        n: int = 100,
+        d: int = 80,
+        d_nonzero: int = 5,
+        classification: bool = False,
 ) -> (pd.DataFrame, np.ndarray):
-
     label = np.array(
         ["A" + str(i) for i in range(d // 2)]
         + ["B" + str(i) for i in range(d - d // 2)]
@@ -88,17 +69,19 @@ def generate_data(
 
 
 def transform_features(
-    features: pd.DataFrame, transformation: Str = "clr", coef: float = 0.5
+    features: pd.DataFrame, transformation: str = "clr", coef: float = 0.5
 ) -> pd.DataFrame:
     if transformation == "clr":
         X = features.values
-        null_set = X <= 0.0
+        null_set = X <= 0.0# just ignore zero replacement for the sake of experiment
         X[null_set] = coef
         X = np.log(X)
         X = (X.T - np.mean(X, axis=1)).T
+        # X = (X - np.mean(X, axis=0)) if X is (p,n)
 
         return pd.DataFrame(
-            data=X, index=list(features.index), columns=list(features.columns)
+            data=X, index=list(features.index.astype(str)),
+            columns=list(features.columns.astype(str))
         )
 
     else:
@@ -108,18 +91,17 @@ def transform_features(
 
 
 def add_taxa(
-    features: pd.DataFrame, weights: np.ndarray = None, taxa: skbio.TreeNode = None
+        features: pd.DataFrame, weights: np.ndarray = None, taxa: skbio.TreeNode = None
 ) -> (pd.DataFrame, np.ndarray):
-
     X = features.values
     label = list(features.columns)
     A, label_new = tree_to_matrix(taxa, label, with_repr=True)
-    nleaves = np.sum(A,axis=0)
-    X_new = X.dot(A)/nleaves
+    nleaves = np.sum(A, axis=0)
+    X_new = X.dot(A) / nleaves
     if weights is None:
-        w_new = 1./nleaves
+        w_new = 1. / nleaves
     else:
-        w_new = weights/nleaves
+        w_new = weights / nleaves
     dfx = pd.DataFrame(
         data=X_new, index=list(features.index), columns=label_new
     )
@@ -128,37 +110,34 @@ def add_taxa(
 
 
 def add_covariates(
-    covariates: qiime2.Metadata,
-    to_add: str,
-    features: pd.DataFrame = None,
-    c: np.ndarray = None,
-    rescale: list = None,
-    weights:np.ndarray=None,
-    w_to_add: list = None
-) -> (pd.DataFrame, np.ndarray,np.ndarray):
-
-
-
+        covariates: qiime2.Metadata,
+        to_add: str,
+        features: pd.DataFrame = None,
+        c: np.ndarray = None,
+        rescale: list = None,
+        weights: np.ndarray = None,
+        w_to_add: list = None
+) -> (pd.DataFrame, np.ndarray, np.ndarray):
     d = len(features.columns)
     covariates_df = covariates.to_dataframe()
     covariates_df = covariates_df[to_add]
 
     if rescale is None:
-        rescale = [False]*len(to_add)
-    elif len(rescale)!=len(to_add):
-        raise ValueError( "List rescale and to_add have different lengths")
-    
+        rescale = [False] * len(to_add)
+    elif len(rescale) != len(to_add):
+        raise ValueError("List rescale and to_add have different lengths")
+
     if weights is None:
         weights = np.ones(d)
     elif len(weights) != d:
-        raise ValueError( "weigths and features have different dimension")
-    
-    if w_to_add is None:
-        w_to_add = [1.]*len(to_add)
-    elif len(w_to_add) != len(to_add):
-        raise ValueError( "Lists to_add and w_to_add have different lengths")
+        raise ValueError("weigths and features have different dimension")
 
-    for i,name in enumerate(to_add):
+    if w_to_add is None:
+        w_to_add = [1.] * len(to_add)
+    elif len(w_to_add) != len(to_add):
+        raise ValueError("Lists to_add and w_to_add have different lengths")
+
+    for i, name in enumerate(to_add):
         type_ = covariates.columns[name].type
         serie = covariates_df[name]
         vect = serie.to_numpy()
@@ -170,86 +149,84 @@ def add_covariates(
             missing = np.isnan(vect)
             vect[missing] = np.mean(vect[~missing])
             covariates_df[name] = vect
-            weights=np.append(weights, w_to_add[i])
+            weights = np.append(weights, w_to_add[i])
         elif type_ == "categorical":
             values_encont = []
             for value_name in vect:
                 if value_name not in values_encont:
                     values_encont.append(value_name)
-                    binary_vect = 1*(vect==value_name)
+                    binary_vect = 1 * (vect == value_name)
                     nb_col = len(covariates_df.columns)
-                    covariates_df.insert(nb_col-1, column=name +' = '+value_name, value=binary_vect)
-                    weights=np.append(weights, w_to_add[i])
+                    covariates_df.insert(nb_col - 1, column=name + ' = ' + value_name, value=binary_vect)
+                    weights = np.append(weights, w_to_add[i])
 
             covariates_df = covariates_df.drop(columns=name)
-            
+
     if features is not None:
         # features, covariates_df
         # = features.align(covariates_df, join='inner',axis=0)
         X = pd.concat([features, covariates_df], axis=1, join="inner")
         d_new = len(X.columns)
-        
+
         if c is None:
-            c = np.ones((1,d))
-        
+            c = np.ones((1, d))
+
         c_new = np.zeros((len(c), d_new))
-        c_new[:, : d ] = c
+        c_new[:, : d] = c
     else:
         X = covariates_df
         c_new = np.zeros((1, d_new))
-
 
     return X, c_new, weights
 
 
 def regress(
-    features: pd.DataFrame,
-    y: qiime2.NumericMetadataColumn,
-    c: np.ndarray = None,
-    weights:np.ndarray = None,
-    do_yshift: bool = False,
-    # taxa: skbio.TreeNode = None,
-    # PATH parameters :
-    path: bool = True,
-    path_numerical_method: str = "not specified",
-    path_n_active: int = 0,
-    path_nlam_log: int = 40,
-    path_lamin_log: float = 1e-2,
-    # CV parameters :
-    cv: bool = True,
-    cv_numerical_method: str = "not specified",
-    cv_seed: int = 1,
-    cv_one_se: bool = True,
-    cv_subsets: int = 5,
-    cv__nlam: int = 100,
-    cv_lamin: float = 1e-3,
-    cv_logscale: bool = True,
-    # StabSel parameters :
-    stabsel: bool = True,
-    stabsel_numerical_method: str = "not specified",
-    stabsel_seed: int = None,  # do something here ! for now it can be a bool !
-    stabsel_lam: float = -1.0,  # if negative, then it means 'theoretical'
-    stabsel_true_lam: bool = True,
-    stabsel_method: str = "first",
-    stabsel_b: int = 50,
-    stabsel_q: int = 10,
-    stabsel_percent_ns: float = 0.5,
-    stabsel_lamin: float = 1e-2,
-    stabsel_threshold: float = 0.7,
-    stabsel_threshold_label: float = 0.4,
-    # might unneeded here, but needed for visualisation
-    # LAMfixed parameters :
-    lamfixed: bool = True,
-    lamfixed_numerical_method: str = "not specified",
-    lamfixed_lam: float = -1.0,  # if negative, then it means 'theoretical'
-    lamfixed_true_lam: bool = True,
-    # Formulation parameters
-    concomitant: bool = True,
-    huber: bool = False,
-    rho: float = 1.345,
-    intercept: bool = True,
+        features: pd.DataFrame,
+        y: qiime2.NumericMetadataColumn,
+        c: np.ndarray = None,
+        weights: np.ndarray = None,
+        do_yshift: bool = False,
+        # taxa: skbio.TreeNode = None,
+        # PATH parameters :
+        path: bool = True,
+        path_numerical_method: str = "not specified",
+        path_n_active: int = 0,
+        path_nlam_log: int = 40,
+        path_lamin_log: float = 1e-2,
+        # CV parameters :
+        cv: bool = True,
+        cv_numerical_method: str = "not specified",
+        cv_seed: int = 1,
+        cv_one_se: bool = True,
+        cv_subsets: int = 5,
+        cv__nlam: int = 100,
+        cv_lamin: float = 1e-3,
+        cv_logscale: bool = True,
+        # StabSel parameters :
+        stabsel: bool = True,
+        stabsel_numerical_method: str = "not specified",
+        stabsel_seed: int = None,  # do something here ! for now it can be a bool !
+        stabsel_lam: float = -1.0,  # if negative, then it means 'theoretical'
+        stabsel_true_lam: bool = True,
+        stabsel_method: str = "first",
+        stabsel_b: int = 50,
+        stabsel_q: int = 10,
+        stabsel_percent_ns: float = 0.5,
+        stabsel_lamin: float = 1e-2,
+        stabsel_threshold: float = 0.7,
+        stabsel_threshold_label: float = 0.4,
+        # might unneeded here, but needed for visualisation
+        # LAMfixed parameters :
+        lamfixed: bool = True,
+        lamfixed_numerical_method: str = "not specified",
+        lamfixed_lam: float = -1.0,  # if negative, then it means 'theoretical'
+        lamfixed_true_lam: bool = True,
+        # Formulation parameters
+        concomitant: bool = True,
+        huber: bool = False,
+        rho: float = 1.345,
+        intercept: bool = True,
 ) -> classo_problem:
-
     complete_y = y.to_series()
     complete_y = complete_y[~complete_y.isna()]
 
@@ -275,12 +252,9 @@ def regress(
     d = X.shape[1]
     if weights is not None:
         if len(weights) < d:
-            problem.formulation.w = np.concatenate([weights,np.ones(d-len(weights))], axis=0)
+            problem.formulation.w = np.concatenate([weights, np.ones(d - len(weights))], axis=0)
         else:
             problem.formulation.w = weights[:d]
-
-
-
 
     problem.model_selection.PATH = path
     if path:
@@ -342,56 +316,55 @@ def regress(
 
 
 def classify(
-    features: pd.DataFrame,
-    y: qiime2.CategoricalMetadataColumn,
-    c: np.ndarray = None,
-    weights:np.ndarray = None,
-    # taxa: skbio.TreeNode = None,
-    # PATH parameters :
-    path: bool = True,
-    path_numerical_method: str = "not specified",
-    path_n_active: int = 0,
-    path_nlam_log: int = 40,
-    path_lamin_log: float = 1e-2,
-    # CV parameters :
-    cv: bool = True,
-    cv_numerical_method: str = "not specified",
-    cv_seed: int = 1,
-    cv_one_se: bool = True,
-    cv_subsets: int = 5,
-    cv__nlam: int = 100,
-    cv_lamin: float = 1e-3,
-    cv_logscale: bool = True,
-    # StabSel parameters :
-    stabsel: bool = True,
-    stabsel_numerical_method: str = "not specified",
-    stabsel_seed: int = None,  # do something here ! for now it can be a bool !
-    stabsel_lam: float = -1.0,  # if negative, then it means 'theoretical'
-    stabsel_true_lam: bool = True,
-    stabsel_method: str = "first",
-    stabsel_b: int = 50,
-    stabsel_q: int = 10,
-    stabsel_percent_ns: float = 0.5,
-    stabsel_lamin: float = 1e-2,
-    stabsel_threshold: float = 0.7,
-    stabsel_threshold_label: float = 0.4,
-    # might unneeded here, but needed for visualisation
-    # LAMfixed parameters :
-    lamfixed: bool = True,
-    lamfixed_numerical_method: str = "not specified",
-    lamfixed_lam: float = -1.0,  # if negative, then it means 'theoretical'
-    lamfixed_true_lam: bool = True,
-    # Formulation parameters
-    huber: bool = False,
-    rho: float = 0.0,
-    intercept: bool = True,
+        features: pd.DataFrame,
+        y: qiime2.CategoricalMetadataColumn,
+        c: np.ndarray = None,
+        weights: np.ndarray = None,
+        # taxa: skbio.TreeNode = None,
+        # PATH parameters :
+        path: bool = True,
+        path_numerical_method: str = "not specified",
+        path_n_active: int = 0,
+        path_nlam_log: int = 40,
+        path_lamin_log: float = 1e-2,
+        # CV parameters :
+        cv: bool = True,
+        cv_numerical_method: str = "not specified",
+        cv_seed: int = 1,
+        cv_one_se: bool = True,
+        cv_subsets: int = 5,
+        cv__nlam: int = 100,
+        cv_lamin: float = 1e-3,
+        cv_logscale: bool = True,
+        # StabSel parameters :
+        stabsel: bool = True,
+        stabsel_numerical_method: str = "not specified",
+        stabsel_seed: int = None,  # do something here ! for now it can be a bool !
+        stabsel_lam: float = -1.0,  # if negative, then it means 'theoretical'
+        stabsel_true_lam: bool = True,
+        stabsel_method: str = "first",
+        stabsel_b: int = 50,
+        stabsel_q: int = 10,
+        stabsel_percent_ns: float = 0.5,
+        stabsel_lamin: float = 1e-2,
+        stabsel_threshold: float = 0.7,
+        stabsel_threshold_label: float = 0.4,
+        # might unneeded here, but needed for visualisation
+        # LAMfixed parameters :
+        lamfixed: bool = True,
+        lamfixed_numerical_method: str = "not specified",
+        lamfixed_lam: float = -1.0,  # if negative, then it means 'theoretical'
+        lamfixed_true_lam: bool = True,
+        # Formulation parameters
+        huber: bool = False,
+        rho: float = 0.0,
+        intercept: bool = True,
 ) -> classo_problem:
-
     complete_y = y.to_series()
     complete_y = complete_y[~complete_y.isna()]
     first_cell = complete_y[0]
 
-    #print(sum(complete_y==complete_y[0]), len(complete_y))
+    # print(sum(complete_y==complete_y[0]), len(complete_y))
 
     features, pdY = features.align(y.to_series(), join="inner", axis=0)
     missing = pdY.isna()
@@ -410,16 +383,15 @@ def classify(
     problem.formulation.classification = True
     problem.formulation.concomitant = False
     problem.formulation.huber = huber
-    #print(rho)
+    # print(rho)
     problem.formulation.rho_classification = rho
     problem.formulation.intercept = intercept
     d = X.shape[1]
     if weights is not None:
         if len(weights) < d:
-            problem.formulation.w = np.concatenate([weights,np.ones(d-len(weights))], axis=0)
+            problem.formulation.w = np.concatenate([weights, np.ones(d - len(weights))], axis=0)
         else:
             problem.formulation.w = weights[:d]
-
 
     problem.model_selection.PATH = path
     if path:
@@ -472,7 +444,7 @@ def classify(
     problem.solve()
 
     cy = complete_y.values
-    problem.data.complete_y = 2*(cy == cy[0])-1
+    problem.data.complete_y = 2 * (cy == cy[0]) - 1
     problem.data.complete_labels = list(complete_y.index)
     problem.data.training_labels = training_labels
 
@@ -491,18 +463,18 @@ def verfify_binary(y):
             + " ; ".join(lis)
         )
 
+
 def categorical_to_df(col):
     lis = []
     for i in col:
         if i not in lis:
             lis.append(i)
-    data = {value : col == value for value in lis}
+    data = {value: col == value for value in lis}
     return pd.DataFrame(data=data, dtype=np.int8)
 
 
-
 def predict(
-    features: pd.DataFrame, problem: zarr.hierarchy.Group
+        features: pd.DataFrame, problem: zarr.hierarchy.Group
 ) -> prediction_data:
     labels = np.array(problem["data/label"])
     n, d = features.shape[0], len(labels)
@@ -552,8 +524,6 @@ def predict(
     return predictions
 
 
-
-
 def _code_columns(df, column_map, norm=1.0, normalization=False):
     # this function takes some dataframe, and transform it so that
     # one can add it to the big dataframe of features
@@ -579,9 +549,7 @@ def _code_columns(df, column_map, norm=1.0, normalization=False):
     return df.apply(_code_col, axis=0)
 
 
-
-
-def to_zarr(obj, name, root, first = True):
+def to_zarr(obj, name, root, first=True):
     '''
     Function for converting a python object to a zarr file , with tree structue.
     '''
@@ -592,10 +560,10 @@ def to_zarr(obj, name, root, first = True):
             zz = root.create_group(name)
 
         for key, value in obj.items():
-            to_zarr(value, key, zz, first = False)
+            to_zarr(value, key, zz, first=False)
 
     elif type(obj) in [np.ndarray, pd.DataFrame]:
-        root.create_dataset(name, data = obj, shape = obj.shape)
+        root.create_dataset(name, data=obj, shape=obj.shape)
 
     elif type(obj) == np.float64:
         root.attrs[name] = float(obj)
@@ -607,11 +575,10 @@ def to_zarr(obj, name, root, first = True):
         if name == "tree":
             root.attrs[name] = obj
         else:
-            to_zarr(np.array(obj), name, root, first = False)
+            to_zarr(np.array(obj), name, root, first=False)
 
     elif obj is None or type(obj) in [str, bool, float, int]:
         root.attrs[name] = obj
 
     else:
-        to_zarr(obj.__dict__, name, root, first = first)
-
+        to_zarr(obj.__dict__, name, root, first=first)
